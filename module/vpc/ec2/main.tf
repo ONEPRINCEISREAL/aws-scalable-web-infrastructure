@@ -4,18 +4,19 @@ resource "aws_security_group" "ec2_sg" {
   vpc_id      = var.vpc_id
 
   ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # later we restrict to ALB
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
+    security_groups = [var.alb_sg_id]
   }
 
   ingress {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # you can restrict to your IP
+    cidr_blocks = ["0.0.0.0/0"]
   }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -24,30 +25,22 @@ resource "aws_security_group" "ec2_sg" {
   }
 }
 
-#Creating launch template for EC2 instances
+# Launch Template
 resource "aws_launch_template" "app" {
   name_prefix   = "app-template"
-  image_id      = "ami-0f58b397bc5c1f2e8" # Amazon Linux (Mumbai region)
+  image_id      = "ami-0d3f444bc76de0a79" # Ubuntu (ap-south-1)
   instance_type = "t2.micro"
 
-  #this(vpc_security_group_ids) part come from terraform doc "aws_launch_template" you have to read Argument Reference
   vpc_security_group_ids = [aws_security_group.ec2_sg.id]
 
   user_data = base64encode(<<EOF
-                #!/bin/bash
-                yum update -y
-                yum install -y git nodejs
-
-                cd /home/ec2-user
-                git clone https://github.com/heroku/node-js-sample.git
-
-                cd node-js-sample
-                npm install
-
-                # Run app on port 80
-                PORT=80 npm start > app.log 2>&1 &
-                EOF
+#!/bin/bash
+cd /home/ubuntu
+echo "Hello from ALB" > index.html
+nohup python3 -m http.server 80 --bind 0.0.0.0 > /dev/null 2>&1 &
+EOF
   )
+
   tag_specifications {
     resource_type = "instance"
 
@@ -57,23 +50,22 @@ resource "aws_launch_template" "app" {
   }
 }
 
-#Create Auto Scaling Group (ASG)
-
+# Auto Scaling Group
 resource "aws_autoscaling_group" "app_asg" {
   desired_capacity = 2
   max_size         = 3
   min_size         = 2
 
-  vpc_zone_identifier = var.private_subnet_ids #where you want to launch your ec2 instance
+vpc_zone_identifier = var.public_subnet_ids
 
   launch_template {
     id      = aws_launch_template.app.id
     version = "$Latest"
   }
+
   tag {
     key                 = "Name"
     value               = "app-asg-instance"
     propagate_at_launch = true
   }
-
 }
